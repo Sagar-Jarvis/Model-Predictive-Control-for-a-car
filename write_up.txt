@@ -1,0 +1,66 @@
+The model developed here is:
+
+x_[t] = x[t-1] + v[t-1] * cos(psi[t-1]) * dt
+y_[t] = y[t-1] + v[t-1] * sin(psi[t-1]) * dt
+psi_[t] = psi[t-1] + v[t-1] / Lf * delta[t-1] * dt
+v_[t] = v[t-1] + a[t-1] * dt
+cte[t] = f(x[t-1]) - y[t-1] + v[t-1] * sin(epsi[t-1]) * dt
+epsi[t] = psi[t] - psides[t-1] + v[t-1] * delta[t-1] / Lf * dt
+
+
+The variables are the state and error terms in a vector form like this: [x,y,?,v,cte,e?].
+And the constraints are the steering angle and acceleration having -30deg to 30 deg for steering angle and -1 to 1 for acceleration: [d,a]
+
+In the above equations the x, y position and psi angle with velocity at time t is calculated by using the previous time step values
+respectively and adding in terms by which they are influenced. Like for example position at time t is affected by velocity vector and psi angle
+at time t-1 along with it's previous position. Similary angle psi is influenced by velocity, the centroid of the vehicle which is Lf and
+steering angle. Velocity is a basic kinematic equation v = u + at form.
+
+The cross track error and the orientation error chip in their own current error and the change in error caused by the vehicle's movement to
+calculate their respective total error at time step t.
+
+
+The N and dt values play a quite important role in the execution. I started with lower values of N like 7-8 and I found that it was little
+hazy in taking decision before curves. I also used 13 as N value only to find it's planning way ahead of the actual trajectory and slowing
+down the simul run which in turn makes things worse on the 2nd or 3rd lap where it goes off road eventually due to over turn. Value 10 for N
+best fit the model. For dt values I tried doing 0.3 and I found the car was too cautious and was using brakes a lot and never crosed 30mph 
+speed. And also as there is 100 millisceonds delay it makes sense to have dt = 0.1.
+
+In order to waypoints estimate the road curvature it had to be transformed from global coordinate system to vehicle coordinate system as shown
+below:
+
+// transform vehicle coordinates
+
+          for (int i = 0; i < ptsx.size(); i++ ) {
+            double diff_x = ptsx[i] - px;
+            double diff_y = ptsy[i] - py;
+
+            points_x.push_back(diff_x * cos(-psi) - diff_y * sin(-psi));
+            points_y.push_back(diff_x * sin(-psi) + diff_y * cos(-psi));
+          }
+
+It's fit using polyfit function and then evaluated using polyeval.
+
+We had to account for 100 millisec latency. So in that time the model had to estimate the state of the vehicle and for doing that a very linear
+kinematic model is used where its a constant velocity and no turn state. Which results in vehicle only traveling in x-direction and
+accordingly have other variables calculate. As shown below:
+
+// compensate for actuator latency
+          // delay_t = 100ms
+          const double delay_t = 0.1;
+          const double Lf = 2.67;
+
+          // embed the actuator delay into new state vector simulating the delay
+          double delayed_x = v * delay_t;
+          double delayed_y = 0;
+          double delayed_psi = - v * steer_value / Lf * delay_t;
+          double delayed_v = v + throttle_value * delay_t;
+          double delayed_cte = cte + v * sin(epsi) * delay_t;
+          double delayed_epsi = epsi - v * steer_value / Lf * delay_t;
+
+          Eigen::VectorXd state(6);
+          state << delayed_x, delayed_y, delayed_psi, delayed_v, delayed_cte, delayed_epsi;
+
+          auto vars = mpc.Solve(state, coeffs);
+
+
